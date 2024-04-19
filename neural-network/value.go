@@ -36,6 +36,28 @@ func (value Value) GetGrad() float64 {
 	return value.grad
 }
 
+// Resets the gradients of all the values in the tree with root at value.
+// This is required in every step of the optimization algorithm.
+func ResetGrad(value *Value) {
+	if value == nil {
+		return
+	}
+	value.grad = 0.0
+	ResetGrad(value.left)
+	ResetGrad(value.right)
+}
+
+// Moves in the direction of the gradient descent and updates model
+// parameters. This step must be called after the backpropagation step.
+func NextData(learningRate float64, value *Value) {
+	if value == nil {
+		return
+	}
+	value.data -= learningRate * value.grad
+	NextData(learningRate, value.left)
+	NextData(learningRate, value.right)
+}
+
 // Addition: a+b
 func Add(a, b *Value) *Value {
 	ans := &Value{
