@@ -3,228 +3,229 @@ package nn
 import (
 	"fmt"
 	"log"
+	"math"
+
 	"github.com/goccy/go-graphviz"
 	"github.com/goccy/go-graphviz/cgraph"
 )
 
 // Value object.
-// Leaf nodes represent input data with op="", left=nil, right=nil, backward=nil.
-// Other nodes represents data resulted from an operation (op) on left and right.
+// Leaf nodes represent input data with op="", len(children)=0 backward=nil.
+// Other nodes represents data resulted from an operation (op) on children.
 // backward() updates gradient of children.
 type Value struct {
 	data, grad float64
-	op string
-	left, right *Value
-	backward func()
+	op         string
+	children   []*Value
+	backward   func()
 }
 
+// Makes a new value from a float number.
 func MakeValue(data float64) *Value {
 	return &Value{
-		data: data,
+		data:     data,
+		children: []*Value{},
 	}
 }
 
+// Returns the data in this value object.
 func (value Value) GetData() float64 {
 	return value.data
 }
 
+// Returns the operation that is applied on the children resulted in
+// this value.
 func (value Value) GetOp() string {
 	return value.op
 }
 
+// Returns the gradient of a given value.
 func (value Value) GetGrad() float64 {
 	return value.grad
 }
 
-// Resets the gradients of all the values in the tree with root at value.
-// This is required in every step of the optimization algorithm.
-func ResetGrad(value *Value) {
-	if value == nil {
-		return
-	}
-	value.grad = 0.0
-	ResetGrad(value.left)
-	ResetGrad(value.right)
-}
-
-// Moves in the direction of the gradient descent and updates model
-// parameters. This step must be called after the backpropagation step.
-func NextData(learningRate float64, value *Value) {
-	if value == nil {
-		return
-	}
-	value.data -= learningRate * value.grad
-	NextData(learningRate, value.left)
-	NextData(learningRate, value.right)
-}
-
 // Addition: a+b
-func Add(a, b *Value) *Value {
+func (value *Value) Add(other *Value) *Value {
+	op := "+"
+	if value == other {
+		op = "*2"
+	}
 	ans := &Value{
-		data: a.data + b.data,
-		op: "+", 
-		left: a, 
-		right: b,
+		data:     value.data + other.data,
+		op:       op,
+		children: []*Value{value, other},
 	}
 	ans.backward = func() {
-		a.grad += ans.grad
-		b.grad += ans.grad
+		value.grad += ans.grad
+		other.grad += ans.grad
 	}
-	return ans 
+	return ans
 }
 
 // Multiplication: a*b
-func Mul(a, b *Value) *Value {
+func (value *Value) Mul(other *Value) *Value {
+	op := "*"
+	if value == other {
+		op = "^2"
+	}
 	ans := &Value{
-		data: a.data * b.data,
-		op: "*", 
-		left: a, 
-		right: b,
+		data:     value.data * other.data,
+		op:       op,
+		children: []*Value{value, other},
 	}
 	ans.backward = func() {
-		a.grad += b.data * ans.grad
-		b.grad += a.data * ans.grad
+		value.grad += other.data * ans.grad
+		other.grad += value.data * ans.grad
 	}
-	return ans 
+	return ans
+}
+
+func (value *Value) Pow(b float64) *Value {
+	op := fmt.Sprintf("^%.2f", b)
+	ans := &Value{
+		data:     math.Pow(value.data, b),
+		op:       op,
+		children: []*Value{value},
+	}
+	ans.backward = func() {
+		value.grad += (b * math.Pow(value.data, b-1.0)) * ans.grad
+	}
+	return ans
 }
 
 // Subtraction: a-b
-func Sub(a, b *Value) *Value {
+func (value *Value) Sub(other *Value) *Value {
+	op := "-"
+	if value == other {
+		op = "*0"
+	}
 	ans := &Value{
-		data: a.data - b.data,
-		op: "-", 
-		left: a, 
-		right: b,
+		data:     value.data - other.data,
+		op:       op,
+		children: []*Value{value, other},
 	}
 	ans.backward = func() {
-		a.grad += ans.grad
-		b.grad -= ans.grad
+		value.grad += ans.grad
+		other.grad -= ans.grad
 	}
-	return ans 
+	return ans
 }
 
 // Division: a/b
-func Div(a, b *Value) *Value {
-	ans := &Value{
-		data: a.data / b.data,
-		op: "/", 
-		left: a, 
-		right: b,
-	}
-	ans.backward = func() {
-		div := ans.grad / b.data
-		a.grad += div
-		b.grad -= a.data * div / b.data
-	}
-	return ans 
+func (value *Value) Div(other *Value) *Value {
+	return value.Mul(other.Pow(-1.0))
 }
 
-// Implements backward propagation by calling backward of each Value node
-// on the topologically sorted list of nodes.
-func BackPropagate(value *Value) {
-	preorder := []*Value{}
-	topoSort(value, &preorder)
+func (value *Value) Log() *Value {
+	ans := &Value{
+		data:     math.Log(value.data),
+		op:       "Log",
+		children: []*Value{value},
+	}
+	ans.backward = func() {
+		value.grad += (1.0 / value.data) * ans.grad
+	}
+	return ans
+}
+
+// Implements backward propagation the topologically sorted list of nodes.
+// It's applied on the loss function value which needs to be minimized.
+func (value *Value) BackPropagate() {
+	sorted := []*Value{}
+	topoSort(value, map[*Value]bool{}, &sorted)
 
 	value.grad = 1.0
-	for _, val := range preorder {
-		if val.backward != nil {
-			val.backward()
+	for i := len(sorted) - 1; i >= 0; i-- {
+		if sorted[i].backward != nil {
+			sorted[i].backward()
 		}
 	}
 }
 
-// In a tree, preorder yields topological sort.
-func topoSort(value *Value, ans *[]*Value) {
-	if value == nil {
+func topoSort(value *Value, visited map[*Value]bool, ans *[]*Value) {
+	if value == nil || visited[value] {
 		return
 	}
+	visited[value] = true
+	for _, next := range value.children {
+		topoSort(next, visited, ans)
+	}
 	*ans = append(*ans, value)
-	if value.left != nil {
-		topoSort(value.left, ans)
-	}
-	if value.right != nil {
-		topoSort(value.right, ans)
-	}
-} 
+}
 
 // Builds the graph from the root value of the computation graph and assigns
 // unique IDs to nodes. Leaf value nodes are represented by a single node in
 // the graph. Other nodes are represented by two nodes as op->Value.
 // Example: Consider the following computation graph:
-//        (4,+)
-//         / \
-//      (1,) (3,)
+//
+//	  (4,+)
+//	   / \
+//	(1,) (3,)
+//
 // Its generated graph is as follows:
-//          4
-//          |
-//          +
-//         / \
-//        1   3
-func buildGraph(value *Value, graph *cgraph.Graph, nodeId *int) *cgraph.Node{
+//
+//	  4
+//	  |
+//	  +
+//	 / \
+//	1   3
+func clone(value *Value, graph *cgraph.Graph, nodeId *int, visited map[*Value]*cgraph.Node) *cgraph.Node {
 	if value == nil {
 		return nil
 	}
+	if ans, ok := visited[value]; ok {
+		return ans
+	}
 	(*nodeId)++
 	label := fmt.Sprintf("ID: %d | data: %3.2f | grad: %3.2f", *nodeId, value.data, value.grad)
-	node, err := graph.CreateNode(label)
+	valueNode, err := graph.CreateNode(label)
 	if err != nil {
-	  log.Fatalf("failed to create data node: %v", err)
+		log.Fatalf("failed to create data node: %v", err)
 	}
-	if value.op == "" {
-		// leaf node.
-		return node
-	}
-	// both left and right nodes must exist.
-	// create a node for the operation.
-	(*nodeId)++
-	label = fmt.Sprintf("ID: %d | %s", *nodeId, value.op)
-	opNode, err := graph.CreateNode(label)
-	if err != nil {
-	  log.Fatalf("failed to create op data node: %v", err)
-	}
-	// connect the operation node to the data node.
-	_, err = graph.CreateEdge(value.op, opNode, node)
-	if err != nil {
-	  log.Fatalf("failed to create op->node edge: %v", err)
-	}
-	if value.left != nil {
-		// build left subtree.
-		left := buildGraph(value.left, graph, nodeId)
-		// connect left subtree to the operation node
-		_, err = graph.CreateEdge(value.op, left, opNode)
+	visited[value] = valueNode
+	if value.op != "" {
+		// create a node for the operation.
+		label = fmt.Sprintf("ID: %d | %s", *nodeId, value.op)
+		opNode, err := graph.CreateNode(label)
 		if err != nil {
-		log.Fatalf("failed to create left->op edge: %v", err)
+			log.Fatalf("failed to create op data node: %v", err)
+		}
+		// connect the operation node to the data node.
+		_, err = graph.CreateEdge(value.op, opNode, valueNode)
+		if err != nil {
+			log.Fatalf("failed to create op->node edge: %v", err)
+		}
+		for _, child := range value.children {
+			next := clone(child, graph, nodeId, visited)
+			_, err := graph.CreateEdge("", next, opNode)
+			if err != nil {
+				log.Fatalf("failed to create child->parent edge: %v", err)
+			}
 		}
 	}
-	if value.right != nil {
-		// build right subtree.
-		right := buildGraph(value.right, graph, nodeId)
-		// connect right subtree to the operation node.
-		_, err = graph.CreateEdge(value.op, right, opNode)
-		if err != nil {
-		log.Fatalf("failed to create right->op edge: %v", err)
-		}
-	}
-	return node
+	return valueNode
 }
 
 // Builds and draws a graph and writes it to a file.
-func DrawGraph(value *Value, filename string) {
+func DrawGraph(values []*Value, filename string) {
 	g := graphviz.New()
 	graph, err := g.Graph()
 	if err != nil {
-	  log.Fatalf("failed to initialize graph object: %v", err)
+		log.Fatalf("failed to initialize graph object: %v", err)
 	}
 	defer func() {
-	  if err := graph.Close(); err != nil {
-		log.Fatalf("failed to close graph object: %v", err)
-	  }
-	  g.Close()
+		if err := graph.Close(); err != nil {
+			log.Fatalf("failed to close graph object: %v", err)
+		}
+		g.Close()
 	}()
-	nodeId := 0
-	buildGraph(value, graph, &nodeId)
+
+	nodeId := 1
+	for _, value := range values {
+		clone(value, graph, &nodeId, map[*Value]*cgraph.Node{})
+	}
 
 	if err := g.RenderFilename(graph, graphviz.PNG, filename); err != nil {
 		log.Fatalf("failed to write graph to file: %v", err)
 	}
-} 
+}

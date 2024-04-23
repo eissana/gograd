@@ -4,52 +4,223 @@ import (
 	"math/rand"
 )
 
-// Makes a neuron from a list of values and an activation function.
-// Output of a neuron is a singkle value.
-func MakeNeuron(input []*Value, activation func(*Value) *Value) *Value{
-	// compute w_1 * x_1 + ... + w_n * x_n + b
-	ans := MakeValue(/*intercept=*/0.0)
-	for _, x := range input {
-		// initialize with random weights in [-1, 1)
-		w := MakeValue(rand.Float64()*2.0 - 1.0)
-		ans = Add(ans, Mul(w, x))
-	}
-	// apply activation if given.
-	if activation != nil {
-		ans = activation(ans)
-	}
-	return ans
+// A neural network object consitsting of multiple layers.
+type NeuralNetwork struct {
+	layers []*Layer
 }
 
-// Parameters of a layer including the number of neurons in the layer and
-// the activation function.
-type LayerParam struct {
-	outputSize int
+// A neuron object with parameters w_1, ..., w_n, b.
+type Neuron struct {
+	intercept  *Value
+	weights    []*Value
 	activation func(*Value) *Value
 }
 
-// Makes LayerParam object.
-func MakeLayerParam(numNeurons int, activation func(*Value) *Value) LayerParam {
-	return LayerParam {
-		outputSize: numNeurons,
+// Makes a neuron with a given inputSize. A neuron has inputSize+1 parameters.
+// The intercept is initialized to 0 and weights are initialized to random numbers
+// in [-1, 1).
+func MakeNeuron(inputSize int, activation func(*Value) *Value) *Neuron {
+	weights := make([]*Value, inputSize)
+	for i := range weights {
+		weights[i] = MakeValue(rand.NormFloat64())
+	}
+	return &Neuron{
+		intercept:  MakeValue(rand.NormFloat64()),
+		weights:    weights,
 		activation: activation,
 	}
 }
 
+// Computes output of a neuron as activation(w_1*x_1 + ... + w_n*x_n + b).
+func (n *Neuron) Fit(input []*Value) *Value {
+	// compute w_1 * x_1 + ... + w_n * x_n + b
+	ans := n.intercept
+	for i, x := range input {
+		ans = ans.Add(x.Mul(n.weights[i]))
+	}
+	// Fit activation if given.
+	if n.activation != nil {
+		ans = n.activation(ans)
+	}
+	return ans
+}
+
+// Parameters of a layer: outputSize AKA the number of neurons in the layer.
+// Each layer can have a different activation function.
+type LayerParam struct {
+	outputSize int
+	// The number of activation functions must match the number of
+	activation func(*Value) *Value
+}
+
+// Makes a LayerParam object with a given outputSize (number of neurons) and
+// an activation function.
+func MakeLayerParam(outputSize int, activation func(*Value) *Value) LayerParam {
+	return LayerParam{
+		outputSize: outputSize,
+		activation: activation,
+	}
+}
+
+// A layer object consisting of multiple neurons.
+type Layer struct {
+	neurons []*Neuron
+}
+
 // Makes a layer consisting of multiple neurons.
-func MakeLayer(input []*Value, layerParam LayerParam) []*Value {
-	ans := make([]*Value, layerParam.outputSize)
-	for i := range ans {
-		ans[i] = MakeNeuron(input, layerParam.activation)
+func MakeLayer(inputSize int, layerParam LayerParam) *Layer {
+	neurons := make([]*Neuron, layerParam.outputSize)
+	for i := range neurons {
+		neurons[i] = MakeNeuron(inputSize, layerParam.activation)
+	}
+	return &Layer{
+		neurons: neurons,
+	}
+}
+
+// Computes all output values of the layer given the input values and an
+// activation function.
+func (l *Layer) Fit(input []*Value) []*Value {
+	ans := make([]*Value, len(l.neurons))
+	for i, neuron := range l.neurons {
+		ans[i] = neuron.Fit(input)
 	}
 	return ans
 }
 
 // Makes a neural network consisting of multiple layers.
-func MakeNeuralNetwork(input []*Value, layerParams []LayerParam) []*Value {
-	layer := input
-	for _, layerParam := range layerParams {
-		layer = MakeLayer(layer, layerParam)
+func MakeNeuralNetwork(inputSize int, layerParams []LayerParam) *NeuralNetwork {
+	layers := make([]*Layer, len(layerParams))
+	for i, layerParam := range layerParams {
+		layers[i] = MakeLayer(inputSize, layerParam)
+		inputSize = layerParam.outputSize
 	}
-	return layer
+	return &NeuralNetwork{
+		layers: layers,
+	}
+}
+
+// Fits the model on input data and return the score.
+func (n *NeuralNetwork) Fit(input []*Value) []*Value {
+	ans := input
+	for _, layer := range n.layers {
+		ans = layer.Fit(ans)
+	}
+	return ans
+}
+
+// Computes scores of all input data.
+func (n *NeuralNetwork) Forward(inputs [][]*Value) [][]*Value {
+	scores := make([][]*Value, len(inputs))
+	for i, input := range inputs {
+		scores[i] = n.Fit(input)
+	}
+	return scores
+}
+
+// Computes the loss as a Value object which is minimized in the optimization
+// process when traininng the model.
+func (n *NeuralNetwork) Loss(labels []*Value, scores [][]*Value, trainingParam TrainingParam) *Value {
+	floatNumRecords := float64(len(scores))
+	// Initializing loss = 1/batchSize. Will update loss in the following loop.
+	loss := MakeValue(0.0)
+
+	for i, score := range scores {
+		// Hinge loss: loss += Relu(1 - label * score) where label is in {-1, 1}
+		// loss = loss.Add(Relu(MakeValue(1.0).Sub(labels[i].Mul(score[0]))))
+
+		// cross-entropy loss
+		pos := labels[i].Mul(score[0].Log())
+		neg := MakeValue(1).Sub(labels[i]).Mul(MakeValue(1).Sub(score[0]).Log())
+		loss = loss.Sub(pos.Add(neg))
+	}
+	// accuracy /= floatNumRecords
+	loss = loss.Div(MakeValue(floatNumRecords))
+
+	regularizationParam := trainingParam.Regularization
+	if regularizationParam > 0.0 {
+		// Regularization term
+		norm2Loss := MakeValue(0.0)
+		for _, layer := range n.layers {
+			for _, neuron := range layer.neurons {
+				norm2Loss = norm2Loss.Add(neuron.intercept.Pow(2))
+				for _, weight := range neuron.weights {
+					norm2Loss = norm2Loss.Add(weight.Pow(2))
+				}
+			}
+		}
+		norm2Loss = norm2Loss.Mul(MakeValue(regularizationParam))
+		loss = loss.Add(norm2Loss)
+	}
+	return loss
+}
+
+// TrainingParam holds parameters required for training the network.
+type TrainingParam struct {
+	Epochs                  int
+	Regularization          float64
+	ClassificationThreshold float64
+	LearningRate            float64
+}
+
+// Trains the network by minimizing the loss function
+func (n *NeuralNetwork) Train(inputs [][]*Value, labels []*Value, trainingParam TrainingParam) ([]float64, []*Value) {
+	scores := make([]*Value, len(labels))
+	losses := make([]float64, trainingParam.Epochs)
+	for i := 0; i < trainingParam.Epochs; i++ {
+		outputs := n.Forward(inputs)
+		loss := n.Loss(labels, outputs, trainingParam)
+
+		// Get scores from the last run.
+		if i == trainingParam.Epochs-1 {
+			for i, output := range outputs {
+				scores[i] = output[0]
+			}
+		}
+		losses[i] = loss.GetData()
+
+		n.ResetGrad()
+		loss.BackPropagate()
+
+		n.NextData(trainingParam.LearningRate)
+	}
+	return losses, scores
+}
+
+// Resets grad values of the entire network recursively.
+func (n *NeuralNetwork) ResetGrad() {
+	for _, layer := range n.layers {
+		for _, neuron := range layer.neurons {
+			neuron.intercept.grad = 0.0
+			for _, weight := range neuron.weights {
+				weight.grad = 0.0
+			}
+		}
+	}
+}
+
+// Moves in the direction of the gradient descent and updates model.
+func (n *NeuralNetwork) NextData(learningRate float64) {
+	for _, layer := range n.layers {
+		for _, neuron := range layer.neurons {
+			neuron.intercept.data -= learningRate * neuron.intercept.grad
+			for _, weight := range neuron.weights {
+				weight.data -= learningRate * weight.grad
+			}
+		}
+	}
+}
+
+// Computes the accuracy of a model given scores and labels. It also requires a
+// classification threshold.
+func Accuracy(scores, labels []*Value, trainingParam TrainingParam) (accuracy float64) {
+	threshold := trainingParam.ClassificationThreshold
+	for i, score := range scores {
+		label := labels[i]
+		// label is 0.0 or 1.0, while score is in [0, 1] range.
+		if (label.GetData() > threshold) == (score.GetData() > threshold) {
+			accuracy++
+		}
+	}
+	return accuracy / float64(len(scores))
 }
