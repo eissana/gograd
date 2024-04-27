@@ -120,7 +120,7 @@ func (n *NeuralNetwork) Forward(inputs [][]*Value) [][]*Value {
 
 // Computes the loss as a Value object which is minimized in the optimization
 // process when traininng the model.
-func (n *NeuralNetwork) Loss(labels []*Value, scores [][]*Value, trainingParam TrainingParam) *Value {
+func (n *NeuralNetwork) Loss(labels, scores [][]*Value, trainingParam TrainingParam) *Value {
 	floatNumRecords := float64(len(scores))
 	// Initializing loss = 1/batchSize. Will update loss in the following loop.
 	loss := MakeValue(0.0)
@@ -130,8 +130,8 @@ func (n *NeuralNetwork) Loss(labels []*Value, scores [][]*Value, trainingParam T
 		// loss = loss.Add(Relu(MakeValue(1.0).Sub(labels[i].Mul(score[0]))))
 
 		// cross-entropy loss
-		pos := labels[i].Mul(score[0].Log())
-		neg := MakeValue(1).Sub(labels[i]).Mul(MakeValue(1).Sub(score[0]).Log())
+		pos := labels[i][0].Mul(score[0].Log())
+		neg := MakeValue(1).Sub(labels[i][0]).Mul(MakeValue(1).Sub(score[0]).Log())
 		loss = loss.Sub(pos.Add(neg))
 	}
 	// accuracy /= floatNumRecords
@@ -164,19 +164,12 @@ type TrainingParam struct {
 }
 
 // Trains the network by minimizing the loss function
-func (n *NeuralNetwork) Train(inputs [][]*Value, labels []*Value, trainingParam TrainingParam) ([]float64, []*Value) {
-	scores := make([]*Value, len(labels))
+func (n *NeuralNetwork) Train(inputs, labels [][]*Value, trainingParam TrainingParam) ([]float64, [][]*Value) {
+	scores := [][]*Value{}
 	losses := make([]float64, trainingParam.Epochs)
 	for i := 0; i < trainingParam.Epochs; i++ {
-		outputs := n.Forward(inputs)
-		loss := n.Loss(labels, outputs, trainingParam)
-
-		// Get scores from the last run.
-		if i == trainingParam.Epochs-1 {
-			for i, output := range outputs {
-				scores[i] = output[0]
-			}
-		}
+		scores = n.Forward(inputs)
+		loss := n.Loss(labels, scores, trainingParam)
 		losses[i] = loss.GetData()
 
 		n.ResetGrad()
@@ -213,12 +206,12 @@ func (n *NeuralNetwork) NextData(learningRate float64) {
 
 // Computes the accuracy of a model given scores and labels. It also requires a
 // classification threshold.
-func Accuracy(scores, labels []*Value, trainingParam TrainingParam) (accuracy float64) {
+func Accuracy(scores, labels [][]*Value, trainingParam TrainingParam) (accuracy float64) {
 	threshold := trainingParam.ClassificationThreshold
 	for i, score := range scores {
 		label := labels[i]
 		// label is 0.0 or 1.0, while score is in [0, 1] range.
-		if (label.GetData() > threshold) == (score.GetData() > threshold) {
+		if (label[0].GetData() > threshold) == (score[0].GetData() > threshold) {
 			accuracy++
 		}
 	}

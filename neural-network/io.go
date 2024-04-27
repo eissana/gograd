@@ -30,17 +30,17 @@ func ReadCSV(filename string) [][]string {
 // Returns the inputs and labels of the lines. If batchSize is smaller than
 // the number of records, we randomly sample from it.
 // The input and label sizes are equal to the batchSize.
-func GetRecords(lines [][]string, batchSize int) ([][]*Value, []*Value) {
+func GetRecords(lines [][]string, batchSize int) ([][]*Value, [][]*Value) {
 	numRecords := len(lines)
 	batchIndices := getBatchIndices(batchSize, numRecords, time.Now().Unix())
 
 	inputs := make([][]*Value, 0, batchSize)
-	labels := make([]*Value, 0, batchSize)
+	labels := make([][]*Value, 0, batchSize)
 
 	for _, i := range batchIndices {
 		input, label := getRecord(lines[i])
 		inputs = append(inputs, input)
-		labels = append(labels, label)
+		labels = append(labels, []*Value{label})
 	}
 	return inputs, labels
 }
