@@ -33,6 +33,10 @@ func (value Value) GetData() float64 {
 	return value.data
 }
 
+func (value *Value) SetData(data float64) {
+	value.data = data
+}
+
 // Returns the operation that is applied on the children resulted in
 // this value.
 func (value Value) GetOp() string {
@@ -42,6 +46,10 @@ func (value Value) GetOp() string {
 // Returns the gradient of a given value.
 func (value Value) GetGrad() float64 {
 	return value.grad
+}
+
+func (value *Value) ResetGrad() {
+	value.grad = 0.0
 }
 
 // Addition: a+b
