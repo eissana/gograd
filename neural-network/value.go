@@ -128,6 +128,19 @@ func (value *Value) Log() *Value {
 	return ans
 }
 
+func (value *Value) Exp() *Value {
+	data := math.Exp(value.data)
+	ans := &Value{
+		data:     data,
+		op:       "Exp",
+		children: []*Value{value},
+	}
+	ans.backward = func() {
+		value.grad += data * ans.grad
+	}
+	return ans
+}
+
 // Implements backward propagation the topologically sorted list of nodes.
 // It's applied on the loss function value which needs to be minimized.
 func (value *Value) BackPropagate() {
