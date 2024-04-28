@@ -3,6 +3,7 @@ package nn
 import (
 	"encoding/csv"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"strconv"
@@ -54,6 +55,9 @@ type Plotter struct {
 func (p Plotter) PlotLine(x, y []float64, filename string) {
 	xys := make(plotter.XYs, len(x))
 	for i := range xys {
+		if math.IsNaN(y[i]) {
+			continue
+		}
 		xys[i].X = x[i]
 		xys[i].Y = y[i]
 	}
