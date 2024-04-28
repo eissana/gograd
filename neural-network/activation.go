@@ -61,3 +61,14 @@ func Tanh(value *Value) *Value {
 	}
 	return MakeActivation("Tanh", f, g)(value)
 }
+
+// Exponent: y = exp(x)
+func Exp(value *Value) *Value {
+	f := func(x float64) float64 {
+		return math.Exp(x)
+	}
+	g := func(x float64) float64 {
+		return f(x)
+	}
+	return MakeActivation("Exp", f, g)(value)
+}
