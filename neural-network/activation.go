@@ -63,7 +63,8 @@ func Tanh(value *Value) *Value {
 }
 
 // Exponent: y = exp(x)
-func Exp(value *Value) *Value {
+// The output needs normalization which will be done in the specified layer.
+func Softmax(value *Value) *Value {
 	f := func(x float64) float64 {
 		return math.Exp(x)
 	}

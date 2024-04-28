@@ -11,23 +11,21 @@ type NeuralNetwork struct {
 
 // A neuron object with parameters w_1, ..., w_n, b.
 type Neuron struct {
-	intercept  *Value
-	weights    []*Value
-	activation func(*Value) *Value
+	intercept *Value
+	weights   []*Value
 }
 
 // Makes a neuron with a given inputSize. A neuron has inputSize+1 parameters.
 // The intercept is initialized to 0 and weights are initialized to random numbers
 // in [-1, 1).
-func MakeNeuron(inputSize int, activation func(*Value) *Value) *Neuron {
+func MakeNeuron(inputSize int) *Neuron {
 	weights := make([]*Value, inputSize)
 	for i := range weights {
 		weights[i] = MakeValue(rand.NormFloat64())
 	}
 	return &Neuron{
-		intercept:  MakeValue(rand.NormFloat64()),
-		weights:    weights,
-		activation: activation,
+		intercept: MakeValue(rand.NormFloat64()),
+		weights:   weights,
 	}
 }
 
@@ -37,10 +35,6 @@ func (n *Neuron) Fit(input []*Value) *Value {
 	ans := n.intercept
 	for i, x := range input {
 		ans = ans.Add(x.Mul(n.weights[i]))
-	}
-	// Fit activation if given.
-	if n.activation != nil {
-		ans = n.activation(ans)
 	}
 	return ans
 }
@@ -64,17 +58,19 @@ func MakeLayerParam(outputSize int, activation func(*Value) *Value) LayerParam {
 
 // A layer object consisting of multiple neurons.
 type Layer struct {
-	neurons []*Neuron
+	neurons    []*Neuron
+	activation func(*Value) *Value
 }
 
 // Makes a layer consisting of multiple neurons.
 func MakeLayer(inputSize int, layerParam LayerParam) *Layer {
 	neurons := make([]*Neuron, layerParam.outputSize)
 	for i := range neurons {
-		neurons[i] = MakeNeuron(inputSize, layerParam.activation)
+		neurons[i] = MakeNeuron(inputSize)
 	}
 	return &Layer{
-		neurons: neurons,
+		neurons:    neurons,
+		activation: layerParam.activation,
 	}
 }
 
@@ -84,6 +80,12 @@ func (l *Layer) Fit(input []*Value) []*Value {
 	ans := make([]*Value, len(l.neurons))
 	for i, neuron := range l.neurons {
 		ans[i] = neuron.Fit(input)
+	}
+	// Fit activation if given.
+	if l.activation != nil {
+		for i := range ans {
+			ans[i] = l.activation(ans[i])
+		}
 	}
 	return ans
 }
@@ -125,14 +127,17 @@ func (n *NeuralNetwork) Loss(labels, scores [][]*Value, trainingParam TrainingPa
 	// Initializing loss = 1/batchSize. Will update loss in the following loop.
 	loss := MakeValue(0.0)
 
-	for i, score := range scores {
+	for i := range scores {
 		// Hinge loss: loss += Relu(1 - label * score) where label is in {-1, 1}
 		// loss = loss.Add(Relu(MakeValue(1.0).Sub(labels[i].Mul(score[0]))))
-
-		// cross-entropy loss
-		pos := labels[i][0].Mul(score[0].Log())
-		neg := MakeValue(1).Sub(labels[i][0]).Mul(MakeValue(1).Sub(score[0]).Log())
-		loss = loss.Sub(pos.Add(neg))
+		normalize(scores[i])
+		for j, score := range scores[i] {
+			// cross-entropy loss
+			label := labels[i][j]
+			pos := label.Mul(score.Log())
+			neg := MakeValue(1).Sub(label).Mul(MakeValue(1).Sub(score).Log())
+			loss = loss.Sub(pos.Add(neg))
+		}
 	}
 	// accuracy /= floatNumRecords
 	loss = loss.Div(MakeValue(floatNumRecords))
@@ -153,6 +158,20 @@ func (n *NeuralNetwork) Loss(labels, scores [][]*Value, trainingParam TrainingPa
 		loss = loss.Add(norm2Loss)
 	}
 	return loss
+}
+
+func normalize(score []*Value) {
+	if len(score) < 2 {
+		return
+	}
+	sum := MakeValue(0.0)
+	for i := range score {
+		score[i] = score[i].Exp()
+		sum = sum.Add(score[i])
+	}
+	for i := range score {
+		score[i] = score[i].Div(sum)
+	}
 }
 
 // TrainingParam holds parameters required for training the network.

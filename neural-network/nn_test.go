@@ -16,7 +16,7 @@ func init() {
 }
 
 func TestNeuron(t *testing.T) {
-	model := MakeNeuron(2, Relu)
+	model := MakeNeuron(2)
 	input := []*Value{MakeValue(2), MakeValue(1)}
 	output := model.Fit(input)
 
