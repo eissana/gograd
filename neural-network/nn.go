@@ -1,6 +1,7 @@
 package nn
 
 import (
+	"math"
 	"math/rand"
 )
 
@@ -164,14 +165,24 @@ func normalize(score []*Value) {
 	if len(score) < 2 {
 		return
 	}
-	sum := MakeValue(0.0)
+	sum, max := MakeValue(0.0), getMax(score)
 	for i := range score {
-		score[i] = score[i].Exp()
+		score[i] = score[i].Sub(max).Exp()
 		sum = sum.Add(score[i])
 	}
 	for i := range score {
 		score[i] = score[i].Div(sum)
 	}
+}
+
+func getMax(score []*Value) *Value {
+	out := MakeValue(math.MinInt64)
+	for _, s := range score {
+		if s.data > out.data {
+			*out = *s
+		}
+	}
+	return out
 }
 
 // TrainingParam holds parameters required for training the network.
